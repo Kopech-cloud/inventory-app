@@ -20,3 +20,12 @@ build/
 
 # Database backups
 *.sql
+
+.env
+venv/
+__pycache__/
+*.pyc
+*.exe
+*.pdf
+invoices/
+reports/

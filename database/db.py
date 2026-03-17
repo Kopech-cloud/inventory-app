@@ -6,15 +6,20 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from datetime import datetime
+import bcrypt
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DB_CONFIG = {
-    "host": "73.166.120.244",
-    "user": "inventory_user",
-    "password": "StrongPasswordHere123!",
-    "database": "inventory_app",
-    "port": 3306,
-    "cursorclass": DictCursor,
-    "autocommit": False,
+    "host": os.getenv("DB_HOST"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "database": os.getenv("DB_NAME"),
+    "port": int(os.getenv("DB_PORT", 3306)),
+    "cursorclass": pymysql.cursors.DictCursor
 }
 
 
@@ -45,14 +50,29 @@ def calculate_status(stock_qty: int) -> str:
 def authenticate_user(username: str, password: str):
     conn = get_connection()
     cursor = conn.cursor()
+
     cursor.execute("""
-        SELECT id, username, role
+        SELECT id, username, password, role
         FROM users
-        WHERE username = %s AND password = %s
-    """, (username, password))
+        WHERE username = %s
+    """, (username,))
+
     user = cursor.fetchone()
     conn.close()
-    return user
+
+    if not user:
+        return None
+
+    stored_hash = user["password"].encode()
+
+    if bcrypt.checkpw(password.encode("utf-8"), stored_hash):
+        return {
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"]
+        }
+
+    return None
 
 
 def get_users(search_text: str = ""):
@@ -93,35 +113,17 @@ def get_user_by_id(user_id: int):
 
 
 def add_user(username: str, password: str, role: str):
-    print("ADD USER CALLED:", repr(username), repr(password), repr(role))
-    print("DB MODULE LOADED FROM:", __file__)
-    print("DB TARGET:", DB_CONFIG["host"], DB_CONFIG["database"])
-
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT DATABASE() AS db, @@hostname AS server_name, USER() AS db_user")
-    info = cursor.fetchone()
-    print("CONNECTED TO:", info)
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode()
 
     cursor.execute("""
         INSERT INTO users (username, password, role)
         VALUES (%s, %s, %s)
-    """, (username, password, role))
+    """, (username, hashed, role))
 
-    print("ROWS INSERTED:", cursor.rowcount)
     conn.commit()
-    print("COMMIT DONE")
-
-    cursor.execute("""
-        SELECT id, username, role
-        FROM users
-        WHERE username = %s
-        ORDER BY id DESC
-        LIMIT 3
-    """, (username,))
-    print("POST-INSERT CHECK:", cursor.fetchall())
-
     conn.close()
 
 def update_user(user_id: int, username: str, password: str, role: str):

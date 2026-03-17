@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from database.db_sqlite_backup import authenticate_user
+from database.db import authenticate_user
 from ui.dashboard import DashboardWindow
 
 

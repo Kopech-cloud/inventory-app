@@ -505,9 +505,9 @@ class UserDialog(QDialog):
             return
 
         self.user_data = {
-            "username": username,
-            "password": password,
-            "role": role,
+            "username": self.username_input.text().strip(),
+            "password": self.password_input.text().strip(),
+            "role": self.role_input.currentText().strip(),
         }
         self.accept()
 
