@@ -77,7 +77,7 @@ class ProductDialog(QDialog):
         self.product = product
         self.setWindowTitle("Edit Product" if product else "Add Product")
         self.setModal(True)
-        self.resize(420, 380)
+        self.resize(500, 560)
 
         layout = QVBoxLayout(self)
 
@@ -85,6 +85,10 @@ class ProductDialog(QDialog):
         form.setSpacing(12)
 
         self.name_input = QLineEdit()
+        self.brand_input = QLineEdit()
+        self.model_input = QLineEdit()
+        self.specifications_input = QTextEdit()
+        self.condition_input = QComboBox()
         self.category_input = QLineEdit()
         self.price_input = QLineEdit()
         self.stock_input = QLineEdit()
@@ -94,15 +98,35 @@ class ProductDialog(QDialog):
 
         self.serials_input = QTextEdit()
 
-        self.name_input.setPlaceholderText("e.g. ThinkDiag Mini")
-        self.category_input.setPlaceholderText("e.g. Diagnostic Tool")
-        self.price_input.setPlaceholderText("e.g. 55000")
+        self.name_input.setPlaceholderText("e.g. HP EliteBook 840 G5")
+        self.brand_input.setPlaceholderText("e.g. HP")
+        self.model_input.setPlaceholderText("e.g. 840 G5")
+        self.specifications_input.setPlaceholderText("e.g. Core i5 / 8GB RAM / 256GB SSD")
+        self.condition_input.addItems(["New", "Used", "Refurbished"])
+        self.category_input.setPlaceholderText("e.g. Laptop")
+        self.price_input.setPlaceholderText("e.g. 250000")
         self.stock_input.setPlaceholderText("Auto calculated from serials")
         self.serials_input.setPlaceholderText("Enter one serial number per line")
+
+        self.specifications_input.setFixedHeight(90)
         self.serials_input.setFixedHeight(100)
         self.stock_input.setReadOnly(True)
 
+        self.name_input.setObjectName("searchInput")
+        self.brand_input.setObjectName("searchInput")
+        self.model_input.setObjectName("searchInput")
+        self.specifications_input.setObjectName("")
+        self.condition_input.setObjectName("statusFilter")
+        self.category_input.setObjectName("searchInput")
+        self.price_input.setObjectName("searchInput")
+        self.stock_input.setObjectName("searchInput")
+        self.serials_input.setObjectName("")
+
         form.addRow("Product Name:", self.name_input)
+        form.addRow("Brand:", self.brand_input)
+        form.addRow("Model:", self.model_input)
+        form.addRow("Specifications:", self.specifications_input)
+        form.addRow("Condition:", self.condition_input)
         form.addRow("Category:", self.category_input)
         form.addRow("Price:", self.price_input)
         form.addRow("Track Serials:", self.track_serials_checkbox)
@@ -113,6 +137,10 @@ class ProductDialog(QDialog):
 
         if product:
             self.name_input.setText(product.get("name", ""))
+            self.brand_input.setText(product.get("brand", ""))
+            self.model_input.setText(product.get("model", ""))
+            self.specifications_input.setPlainText(product.get("specifications", ""))
+            self.condition_input.setCurrentText(product.get("product_condition", "New") or "New")
             self.category_input.setText(product.get("category", ""))
             self.price_input.setText(str(product.get("price", "")))
 
@@ -172,19 +200,22 @@ class ProductDialog(QDialog):
             serials = self.get_serial_numbers()
             self.stock_input.setText(str(len(serials)))
 
-    
     def get_data(self):
         track_serials = self.track_serials_checkbox.isChecked()
         serials = self.get_serial_numbers() if track_serials else []
 
         return {
             "name": self.name_input.text().strip(),
+            "brand": self.brand_input.text().strip(),
+            "model": self.model_input.text().strip(),
+            "specifications": self.specifications_input.toPlainText().strip(),
+            "product_condition": self.condition_input.currentText().strip(),
             "category": self.category_input.text().strip(),
             "price": float(self.price_input.text().strip()),
             "stock_qty": len(serials) if track_serials else int(self.stock_input.text().strip() or 0),
             "track_serials": track_serials,
-            "serial_numbers": serials
-        }    
+            "serial_numbers": serials,
+        }
 
     def validate_and_accept(self):
         name = self.name_input.text().strip()
@@ -236,37 +267,38 @@ class ProductDetailsDialog(QDialog):
         super().__init__(parent)
         self.product = product
 
-        self.setWindowTitle(f"Product Details - {product['name']}")
-        self.resize(520, 420)
+        self.setWindowTitle("Product Details")
+        self.setModal(True)
+        self.resize(520, 520)
 
         layout = QVBoxLayout(self)
 
-        track_serials = "Yes" if product.get("track_serials") else "No"
-        serials = get_product_serial_statuses(product["id"])
+        title = QLabel("Product Information")
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title)
 
-        info = QLabel(
-            f"Product Name: {product['name']}\n"
-            f"Category: {product['category']}\n"
-            f"Price: ₦{float(product['price']):,.2f}\n"
-            f"Stock Qty: {product['stock_qty']}\n"
-            f"Status: {product['status']}\n"
-            f"Track Serials: {track_serials}"
+        details = QTextEdit()
+        details.setReadOnly(True)
+
+        serials = product.get("serial_numbers", [])
+        serial_text = "\n".join(serials) if serials else "None"
+
+        details_text = (
+            f"Name: {product.get('name', '')}\n"
+            f"Brand: {product.get('brand', '')}\n"
+            f"Model: {product.get('model', '')}\n"
+            f"Condition: {product.get('product_condition', '')}\n"
+            f"Category: {product.get('category', '')}\n"
+            f"Price: ₦{float(product.get('price', 0)):,.2f}\n"
+            f"Stock Qty: {product.get('stock_qty', 0)}\n"
+            f"Status: {product.get('status', '')}\n"
+            f"Track Serials: {'Yes' if product.get('track_serials') else 'No'}\n\n"
+            f"Specifications:\n{product.get('specifications', '') or 'None'}\n\n"
+            f"Serial Numbers:\n{serial_text}"
         )
-        info.setWordWrap(True)
-        layout.addWidget(info)
 
-        serials_label = QLabel("Available Serials:")
-        serials_label.setObjectName("sectionTitle")
-        layout.addWidget(serials_label)
-
-        self.serials_box = QTextEdit()
-        self.serials_box.setReadOnly(True)
-        self.serials_box.setPlaceholderText("No serial numbers available")
-
-        if serials:
-            lines = [f"{item['serial_number']}  —  {item['status']}" for item in serials]
-            self.serials_box.setPlainText("\n".join(lines))
-        layout.addWidget(self.serials_box)
+        details.setText(details_text)
+        layout.addWidget(details)
 
         close_btn = QPushButton("Close")
         close_btn.setObjectName("secondaryButton")
@@ -662,10 +694,14 @@ class ProductsPage(PageContainer):
         self.edit_btn = QPushButton("Edit Selected")
         self.edit_btn.setObjectName("secondaryButton")
 
+        self.view_btn = QPushButton("View Product")
+        self.view_btn.setObjectName("secondaryButton")
+
         self.delete_btn = QPushButton("Delete Selected")
         self.delete_btn.setObjectName("dangerButton")
 
         actions.addWidget(self.add_btn)
+        actions.addWidget(self.view_btn)
         actions.addWidget(self.edit_btn)
         actions.addWidget(self.delete_btn)
         actions.addStretch()
@@ -702,6 +738,7 @@ class ProductsPage(PageContainer):
         self.layout.addWidget(self.table)
 
         self.add_btn.clicked.connect(self.open_add_dialog)
+        self.view_btn.clicked.connect(self.view_selected_product)
         self.edit_btn.clicked.connect(self.edit_selected_product)
         self.delete_btn.clicked.connect(self.delete_selected_product)
         self.search_btn.clicked.connect(self.load_products)
@@ -792,6 +829,10 @@ class ProductsPage(PageContainer):
 
             add_product(
                 name=data["name"],
+                brand=data["brand"],
+                model=data["model"],
+                specifications=data["specifications"],
+                product_condition=data["product_condition"],
                 category=data["category"],
                 price=data["price"],
                 stock_qty=data["stock_qty"],
@@ -823,6 +864,10 @@ class ProductsPage(PageContainer):
             update_product(
                 product_id=product_id,
                 name=data["name"],
+                brand=data["brand"],
+                model=data["model"],
+                specifications=data["specifications"],
+                product_condition=data["product_condition"],
                 category=data["category"],
                 price=data["price"],
                 stock_qty=data["stock_qty"],
@@ -880,6 +925,20 @@ class ProductsPage(PageContainer):
             return
 
         dialog = ProductDetailsDialog(product, self)
+
+    def view_selected_product(self):
+        product_id = self.get_selected_product_id()
+        if product_id is None:
+            QMessageBox.warning(self, "No Selection", "Please select a product to view.")
+            return
+
+        product = get_product_by_id(product_id)
+        if not product:
+            QMessageBox.warning(self, "Not Found", "Selected product could not be found.")
+            self.load_products()
+            return
+
+        dialog = ProductDetailsDialog(product, self)
         dialog.exec()
 
     def apply_permissions(self):
@@ -887,11 +946,15 @@ class ProductsPage(PageContainer):
         print("PRODUCTS PAGE ROLE:", repr(role))
 
         can_add = role in ["admin", "staff"]
+        can_view = role in ["admin", "staff"]
         can_edit_delete = role == "admin"
 
         self.add_btn.show() if can_add else self.add_btn.hide()
+        self.view_btn.show() if can_view else self.view_btn.hide()
         self.edit_btn.show() if can_edit_delete else self.edit_btn.hide()
         self.delete_btn.show() if can_edit_delete else self.delete_btn.hide()
+
+    
 
 
 class CustomersPage(PageContainer):

@@ -224,7 +224,7 @@ class DashboardWindow(QMainWindow):
         super().__init__()
         self.user = dict(user) if user else {}
         self.role = (self.user.get("role") or "").strip().lower()
-        self.setWindowTitle("Inventory & Invoicing App")
+        self.setWindowTitle("Kopech Solutions Limited - Inventory App")
         self.resize(1450, 900)
 
         self.sidebar_buttons = {}
@@ -323,37 +323,57 @@ class DashboardWindow(QMainWindow):
         self.stacked = QStackedWidget()
         self.stacked.setObjectName("stackedPages")
 
-        all_pages = {
-            "Dashboard": DashboardHomePage(),
-            "Products": ProductsPage(self.user),
-            "Customers": CustomersPage(self.user),
-            "Invoices": InvoicesPage(self.user),
-            "Users": UsersPage(self.user),
-            "Reports": ReportsPage(self.user),
-        }
-
-        self.pages = {name: page for name, page in all_pages.items() if name in self.allowed_pages}
-
-        for page in self.pages.values():
-            self.stacked.addWidget(page)
+        # only track allowed page names for permissions
+        self.pages = {}
 
         layout.addWidget(self.stacked)
         return container
 
+
+    def build_page(self, name: str):
+        if name == "Dashboard":
+            return DashboardHomePage()
+        elif name == "Products":
+            return ProductsPage(self.user)
+        elif name == "Customers":
+            return CustomersPage(self.user)
+        elif name == "Invoices":
+            return InvoicesPage(self.user)
+        elif name == "Users":
+            return UsersPage(self.user)
+        elif name == "Reports":
+            return ReportsPage(self.user)
+        return None
+
+
     def switch_page(self, name: str):
-        if name not in self.pages:
+        if name not in self.allowed_pages:
             QMessageBox.warning(self, "Access Denied", "You do not have permission to open this page.")
             return
 
         if name == "Dashboard":
-            old_page = self.pages["Dashboard"]
-            self.stacked.removeWidget(old_page)
-            old_page.deleteLater()
+            if "Dashboard" in self.pages:
+                old_page = self.pages["Dashboard"]
+                self.stacked.removeWidget(old_page)
+                old_page.deleteLater()
+                del self.pages["Dashboard"]
 
-            self.pages["Dashboard"] = DashboardHomePage()
-            self.stacked.insertWidget(0, self.pages["Dashboard"])
+            page = self.build_page("Dashboard")
+            self.pages["Dashboard"] = page
+            self.stacked.addWidget(page)
+            self.stacked.setCurrentWidget(page)
 
-        self.stacked.setCurrentWidget(self.pages[name])
+        else:
+            if name not in self.pages:
+                page = self.build_page(name)
+                if page is None:
+                    QMessageBox.warning(self, "Error", f"Could not load page: {name}")
+                    return
+
+                self.pages[name] = page
+                self.stacked.addWidget(page)
+
+            self.stacked.setCurrentWidget(self.pages[name])
 
         for page_name, btn in self.sidebar_buttons.items():
             btn.set_active(page_name == name)

@@ -151,7 +151,7 @@ def get_products(search_text: str = "", category_filter: str = "All"):
     cursor = conn.cursor()
 
     query = """
-        SELECT id, name, category, price, stock_qty, status, track_serials, serial_numbers, created_at
+        SELECT id, name, brand, model, specifications, product_condition, category, price, stock_qty, status, track_serials, serial_numbers, created_at
         FROM products
         WHERE 1=1
     """
@@ -188,6 +188,10 @@ def get_products(search_text: str = "", category_filter: str = "All"):
         products.append({
             "id": row["id"],
             "name": row["name"],
+            "brand": row.get("brand") or "",
+            "model": row.get("model") or "",
+            "specifications": row.get("specifications") or "",
+            "product_condition": row.get("product_condition") or "",
             "category": row["category"],
             "price": float(row["price"]),
             "stock_qty": int(row["stock_qty"]),
@@ -198,7 +202,6 @@ def get_products(search_text: str = "", category_filter: str = "All"):
         })
 
     return products
-
 
 def get_all_products():
     conn = get_connection()
@@ -216,11 +219,14 @@ def get_all_products():
 def get_product_by_id(product_id: int):
     conn = get_connection()
     cursor = conn.cursor()
+
     cursor.execute("""
-        SELECT id, name, category, price, stock_qty, status, track_serials, serial_numbers, created_at
+        SELECT id, name, brand, model, specifications, product_condition,
+               category, price, stock_qty, status, track_serials, serial_numbers, created_at
         FROM products
         WHERE id = %s
     """, (product_id,))
+
     row = cursor.fetchone()
     conn.close()
 
@@ -241,6 +247,10 @@ def get_product_by_id(product_id: int):
     return {
         "id": row["id"],
         "name": row["name"],
+        "brand": row.get("brand") or "",
+        "model": row.get("model") or "",
+        "specifications": row.get("specifications") or "",
+        "product_condition": row.get("product_condition") or "",
         "category": row["category"],
         "price": float(row["price"]),
         "stock_qty": int(row["stock_qty"]),
@@ -250,8 +260,18 @@ def get_product_by_id(product_id: int):
         "created_at": row["created_at"],
     }
 
-
-def add_product(name, category, price, stock_qty, track_serials=False, serial_numbers=None):
+def add_product(
+    name,
+    brand,
+    model,
+    specifications,
+    product_condition,
+    category,
+    price,
+    stock_qty,
+    track_serials=False,
+    serial_numbers=None
+):
     if serial_numbers is None:
         serial_numbers = []
 
@@ -259,10 +279,17 @@ def add_product(name, category, price, stock_qty, track_serials=False, serial_nu
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO products (name, category, price, stock_qty, status, track_serials, serial_numbers)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO products (
+            name, brand, model, specifications, product_condition,
+            category, price, stock_qty, status, track_serials, serial_numbers
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         name,
+        brand,
+        model,
+        specifications,
+        product_condition,
         category,
         price,
         stock_qty,
@@ -274,15 +301,44 @@ def add_product(name, category, price, stock_qty, track_serials=False, serial_nu
     conn.close()
 
 
-def update_product(product_id: int, name: str, category: str, price: float, stock_qty: int):
+def update_product(
+    product_id: int,
+    name: str,
+    brand: str,
+    model: str,
+    specifications: str,
+    product_condition: str,
+    category: str,
+    price: float,
+    stock_qty: int
+):
     status = calculate_status(stock_qty)
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE products
-        SET name = %s, category = %s, price = %s, stock_qty = %s, status = %s
+        SET name = %s,
+            brand = %s,
+            model = %s,
+            specifications = %s,
+            product_condition = %s,
+            category = %s,
+            price = %s,
+            stock_qty = %s,
+            status = %s
         WHERE id = %s
-    """, (name, category, price, stock_qty, status, product_id))
+    """, (
+        name,
+        brand,
+        model,
+        specifications,
+        product_condition,
+        category,
+        price,
+        stock_qty,
+        status,
+        product_id
+    ))
     conn.commit()
     conn.close()
 
