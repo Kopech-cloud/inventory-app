@@ -49,6 +49,7 @@ from database.db import (
     get_product_categories,
     get_product_serial_statuses,
     mark_invoice_as_paid,
+    cancel_invoice,
     get_sales_report_summary,
     get_inventory_report_summary,
     get_low_stock_report,
@@ -811,6 +812,17 @@ class ProductsPage(PageContainer):
 
         self.table.resizeRowsToContents()
 
+    def refresh_invoice_page_products(self):
+        window = self.window()
+        if hasattr(window, "pages") and "Invoices" in window.pages:
+            invoice_page = window.pages["Invoices"]
+
+            if hasattr(invoice_page, "load_products_dropdown"):
+                invoice_page.load_products_dropdown()
+
+            if hasattr(invoice_page, "load_invoices"):
+                invoice_page.load_invoices()
+
     def clear_filters(self):
         self.search_input.clear()
         self.status_filter.setCurrentText("All")
@@ -840,6 +852,7 @@ class ProductsPage(PageContainer):
                 serial_numbers=data["serial_numbers"],
             )
             self.load_products()
+            self.refresh_invoice_page_products()
             QMessageBox.information(self, "Success", "Product added successfully.")
             
     def edit_selected_product(self):
@@ -860,20 +873,29 @@ class ProductsPage(PageContainer):
 
         dialog = ProductDialog(self, product=product)
         if dialog.exec():
-            data = dialog.get_data()
-            update_product(
-                product_id=product_id,
-                name=data["name"],
-                brand=data["brand"],
-                model=data["model"],
-                specifications=data["specifications"],
-                product_condition=data["product_condition"],
-                category=data["category"],
-                price=data["price"],
-                stock_qty=data["stock_qty"],
-            )
-            self.load_products()
-            QMessageBox.information(self, "Success", "Product updated successfully.")
+            try:
+                data = dialog.get_data()
+
+                update_product(
+                    product_id=product_id,
+                    name=data["name"],
+                    brand=data["brand"],
+                    model=data["model"],
+                    specifications=data["specifications"],
+                    product_condition=data["product_condition"],
+                    category=data["category"],
+                    price=data["price"],
+                    stock_qty=data["stock_qty"],
+                    track_serials=data["track_serials"],
+                    serial_numbers=data["serial_numbers"],
+                )
+
+                self.load_products()
+                self.refresh_invoice_page_products()
+                QMessageBox.information(self, "Success", "Product updated successfully.")
+
+            except Exception as e:
+                QMessageBox.warning(self, "Update Failed", str(e))
 
     def delete_selected_product(self):
         if not self.current_user or self.current_user.get("role") != "admin":
@@ -896,6 +918,7 @@ class ProductsPage(PageContainer):
         if reply == QMessageBox.Yes:
             delete_product(product_id)
             self.load_products()
+            self.refresh_invoice_page_products()
             QMessageBox.information(self, "Deleted", "Product deleted successfully.")
 
     def load_category_filter(self):
@@ -1217,9 +1240,13 @@ class InvoicesPage(PageContainer):
         self.mark_paid_btn = QPushButton("Mark Invoice Paid")
         self.mark_paid_btn.setObjectName("secondaryButton")
 
+        self.cancel_invoice_btn = QPushButton("Cancel Invoice")
+        self.cancel_invoice_btn.setObjectName("dangerButton")
+
         bottom_row.addWidget(self.remove_item_btn)
         bottom_row.addStretch()
         bottom_row.addWidget(self.total_label)
+        bottom_row.addWidget(self.cancel_invoice_btn)
         bottom_row.addWidget(self.mark_paid_btn)
         bottom_row.addWidget(self.save_invoice_btn)
 
@@ -1283,6 +1310,7 @@ class InvoicesPage(PageContainer):
         self.save_invoice_btn.clicked.connect(self.save_invoice)
         self.invoice_table.cellDoubleClicked.connect(self.open_invoice_details)
         self.mark_paid_btn.clicked.connect(self.mark_selected_invoice_paid)
+        self.cancel_invoice_btn.clicked.connect(self.cancel_selected_invoice)
 
         self.load_customers_dropdown()
         self.load_products_dropdown()
@@ -1292,16 +1320,56 @@ class InvoicesPage(PageContainer):
         self.scan_serial_input.setFocus()
 
     def apply_permissions(self):
-        role = (self.current_user or {}).get("role", "").lower()
-        is_admin = role == "admin"
+        role = (self.current_user or {}).get("role", "").strip().lower()
 
-        if not is_admin:
-            self.mark_paid_btn.hide()
+        can_mark_paid = role in ["admin", "staff"]
+        can_cancel = role in ["admin", "staff"]
+
+        self.mark_paid_btn.setVisible(can_mark_paid)
+        self.cancel_invoice_btn.setVisible(can_cancel)
+
+    def cancel_selected_invoice(self):
+        role = (self.current_user or {}).get("role", "").strip().lower()
+        if role not in ["admin", "staff"]:
+            QMessageBox.warning(self, "Access Denied", "You do not have permission to cancel invoices.")
+            return
+
+        row = self.invoice_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "No Selection", "Please select an invoice first.")
+            return
+
+        invoice_id = int(self.invoice_table.item(row, 0).text())
+        current_status = self.invoice_table.item(row, 4).text().strip().upper()
+
+        if current_status == "PAID":
+            QMessageBox.warning(self, "Not Allowed", "Paid invoices cannot be cancelled.")
+            return
+
+        if current_status == "CANCELLED":
+            QMessageBox.information(self, "Already Cancelled", "This invoice is already cancelled.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Cancel",
+            "Are you sure you want to cancel this invoice?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if reply == QMessageBox.Yes:
+            try:
+                cancel_invoice(invoice_id)
+                self.load_invoices()
+                QMessageBox.information(self, "Cancelled", "Invoice cancelled successfully.")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", str(e))
 
     def mark_selected_invoice_paid(self):
-        role = (self.current_user or {}).get("role", "").lower()
-        if role != "admin":
-            QMessageBox.warning(self, "Access Denied", "Only admin can mark invoices as paid.")
+        role = (self.current_user or {}).get("role", "").strip().lower()
+        if role not in ["admin", "staff"]:
+            QMessageBox.warning(self, "Access Denied", "You do not have permission to mark invoices as paid.")
             return
 
         row = self.invoice_table.currentRow()
@@ -1316,6 +1384,10 @@ class InvoicesPage(PageContainer):
             QMessageBox.information(self, "Already Paid", "This invoice is already marked as PAID.")
             return
 
+        if current_status == "CANCELLED":
+            QMessageBox.warning(self, "Not Allowed", "Cancelled invoices cannot be marked as paid.")
+            return
+
         reply = QMessageBox.question(
             self,
             "Confirm Payment",
@@ -1325,10 +1397,14 @@ class InvoicesPage(PageContainer):
         )
 
         if reply == QMessageBox.Yes:
-            mark_invoice_as_paid(invoice_id)
-            self.load_invoices()
-            QMessageBox.information(self, "Updated", "Invoice marked as PAID.")
-
+            try:
+                mark_invoice_as_paid(invoice_id)
+                self.load_invoices()
+                self.load_products_dropdown()
+                QMessageBox.information(self, "Updated", "Invoice marked as PAID.")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", str(e))
+    
     def load_customers_dropdown(self):
         self.customer_combo.clear()
         customers = get_all_customers()
@@ -1582,9 +1658,24 @@ class InvoicesPage(PageContainer):
             ]
 
             for col_index, value in enumerate(values):
-                self.invoice_table.setItem(row_index, col_index, make_table_item(value))
+                if col_index == 4:
+                    status_value = str(value).upper()
+                    if status_value == "PAID":
+                        item = make_table_item(value, Qt.darkGreen)
+                    elif status_value == "PENDING":
+                        item = make_table_item(value, Qt.darkYellow)
+                    elif status_value == "CANCELLED":
+                        item = make_table_item(value, Qt.red)
+                    else:
+                        item = make_table_item(value)
+                else:
+                    item = make_table_item(value)
+
+                self.invoice_table.setItem(row_index, col_index, item)
 
         self.invoice_table.resizeColumnsToContents()
+
+    
 
     def add_scanned_serial_to_invoice(self):
         serial = self.scan_serial_input.text().strip()
