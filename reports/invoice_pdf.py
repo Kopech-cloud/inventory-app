@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import sys
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -17,9 +19,21 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS  # PyInstaller temp folder
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 # Register Unicode fonts for Naira sign support
-pdfmetrics.registerFont(TTFont("DejaVu", "assets/DejaVuSans.ttf"))
-pdfmetrics.registerFont(TTFont("DejaVu-Bold", "assets/DejaVuSans-Bold.ttf"))
+pdfmetrics.registerFont(
+    TTFont("DejaVu", resource_path("assets/DejaVuSans.ttf"))
+)
+pdfmetrics.registerFont(
+    TTFont("DejaVu-Bold", resource_path("assets/DejaVuSans-Bold.ttf"))
+)
 pdfmetrics.registerFontFamily(
     "DejaVu",
     normal="DejaVu",
@@ -48,9 +62,9 @@ def draw_unpaid_watermark(c, doc):
     c.restoreState()
 
 def draw_background_logo(c, doc):
-    logo_path = Path("assets/logo.png")
+    logo_path = resource_path("assets/logo.png")
 
-    if not logo_path.exists():
+    if not os.path.exists(logo_path):
         return
 
     try:
@@ -150,11 +164,12 @@ def export_invoice_pdf(invoice, items, output_dir="invoices"):
     story = []
 
     # Header with logo + invoice title
-    logo_path = Path("assets/logo.png")
+    logo_path = resource_path("assets/logo.png")
     logo_cell = ""
-    if logo_path.exists():
+
+    if os.path.exists(logo_path):
         try:
-            logo_cell = Image(str(logo_path), width=42 * mm, height=18 * mm)
+            logo_cell = Image(logo_path, width=42 * mm, height=18 * mm)
         except Exception:
             logo_cell = ""
 

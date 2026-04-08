@@ -9,9 +9,27 @@ from datetime import datetime
 import bcrypt
 
 import os
+import sys
 from dotenv import load_dotenv
 
-load_dotenv()
+
+def load_environment():
+    candidates = []
+
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).resolve().parent / ".env")
+
+    candidates.append(Path(__file__).resolve().parent.parent / ".env")
+
+    for env_path in candidates:
+        if env_path.exists():
+            load_dotenv(env_path)
+            return
+
+    load_dotenv()
+
+
+load_environment()
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
@@ -312,9 +330,18 @@ def update_product(
     product_condition: str,
     category: str,
     price: float,
-    stock_qty: int
+    stock_qty: int,
+    track_serials: bool,
+    serial_numbers: list
 ):
+    if serial_numbers is None:
+        serial_numbers = []
+
+    if track_serials:
+        stock_qty = len(serial_numbers)
+
     status = calculate_status(stock_qty)
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -327,7 +354,9 @@ def update_product(
             category = %s,
             price = %s,
             stock_qty = %s,
-            status = %s
+            status = %s,
+            track_serials = %s,
+            serial_numbers = %s
         WHERE id = %s
     """, (
         name,
@@ -339,11 +368,12 @@ def update_product(
         price,
         stock_qty,
         status,
+        1 if track_serials else 0,
+        json.dumps(serial_numbers),
         product_id
     ))
     conn.commit()
     conn.close()
-
 
 def delete_product(product_id: int):
     conn = get_connection()
@@ -512,6 +542,17 @@ def update_customer(customer_id: int, name: str, phone: str, email: str, address
 def delete_customer(customer_id: int):
     conn = get_connection()
     cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT COUNT(*) AS total FROM invoices WHERE customer_id = %s",
+        (customer_id,)
+    )
+    result = cursor.fetchone()
+
+    if result["total"] > 0:
+        conn.close()
+        raise ValueError("This customer cannot be deleted because they already have invoice history.")
+
     cursor.execute("DELETE FROM customers WHERE id = %s", (customer_id,))
     conn.commit()
     conn.close()
@@ -584,13 +625,122 @@ def get_invoice_items(invoice_id: int):
 def mark_invoice_as_paid(invoice_id: int):
     conn = get_connection()
     cursor = conn.cursor()
+
+    try:
+        # Get invoice
+        cursor.execute("SELECT * FROM invoices WHERE id = %s", (invoice_id,))
+        invoice = cursor.fetchone()
+
+        if not invoice:
+            raise ValueError("Invoice not found")
+
+        if invoice["payment_status"] == "PAID":
+            raise ValueError("Invoice already paid")
+
+        # Get items
+        cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = %s", (invoice_id,))
+        items = cursor.fetchall()
+
+        working_products = {}
+
+        for item in items:
+            product_id = item["product_id"]
+
+            if product_id not in working_products:
+                product = get_product_by_id(product_id)
+
+                working_products[product_id] = {
+                    "stock_qty": product["stock_qty"],
+                    "serial_numbers": list(product.get("serial_numbers", [])),
+                    "track_serials": bool(product.get("track_serials", False)),
+                }
+
+            product_state = working_products[product_id]
+
+            quantity = int(item["quantity"])
+            serial = (item.get("serial_number") or "").strip()
+
+            if product_state["track_serials"]:
+                if serial not in product_state["serial_numbers"]:
+                    raise ValueError(f"Serial {serial} not available")
+
+                product_state["serial_numbers"].remove(serial)
+                product_state["stock_qty"] = len(product_state["serial_numbers"])
+
+            else:
+                if product_state["stock_qty"] < quantity:
+                    raise ValueError("Not enough stock")
+
+                product_state["stock_qty"] -= quantity
+
+        # Update products
+        for product_id, state in working_products.items():
+            cursor.execute("""
+                UPDATE products
+                SET stock_qty = %s,
+                    status = %s,
+                    serial_numbers = %s
+                WHERE id = %s
+            """, (
+                state["stock_qty"],
+                calculate_status(state["stock_qty"]),
+                json.dumps(state["serial_numbers"]),
+                product_id
+            ))
+
+        # Mark invoice paid
+        cursor.execute("""
+            UPDATE invoices
+            SET payment_status = 'PAID'
+            WHERE id = %s
+        """, (invoice_id,))
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def cancel_invoice(invoice_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE invoices
+            SET payment_status = 'CANCELLED'
+            WHERE id = %s
+        """, (invoice_id,))
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def search_invoices_by_customer_name(customer_name: str):
+    customer_name = customer_name.strip()
+    if not customer_name:
+        return []
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
     cursor.execute("""
-        UPDATE invoices
-        SET payment_status = 'PAID'
-        WHERE id = %s
-    """, (invoice_id,))
-    conn.commit()
+        SELECT id, invoice_number, customer_name, total_amount, payment_status, created_at
+        FROM invoices
+        WHERE customer_name LIKE %s
+        ORDER BY id DESC
+        LIMIT 20
+    """, (f"%{customer_name}%",))
+
+    rows = cursor.fetchall()
     conn.close()
+    return rows
 
 
 def create_invoice(customer_id: int, items: list):
@@ -614,32 +764,7 @@ def create_invoice(customer_id: int, items: list):
                 raise ValueError(f"Product not found: {item['product_name']}")
 
             quantity = int(item["quantity"])
-            if quantity <= 0:
-                raise ValueError(f"Invalid quantity for {product['name']}")
-
             serial_number = item.get("serial_number", "").strip()
-
-            if product.get("track_serials", False):
-                if quantity != 1:
-                    raise ValueError(f"Serialized product {product['name']} must have quantity 1 per line.")
-
-                available_serials = product.get("serial_numbers", [])
-                if serial_number == "":
-                    raise ValueError(f"Serial number is required for {product['name']}")
-
-                if serial_number not in available_serials:
-                    raise ValueError(f"Serial number {serial_number} is not available for {product['name']}.")
-
-                new_serials = [s for s in available_serials if s != serial_number]
-                new_stock = len(new_serials)
-            else:
-                if product["stock_qty"] < quantity:
-                    raise ValueError(
-                        f"Not enough stock for {product['name']}. Available: {product['stock_qty']}"
-                    )
-
-                new_stock = product["stock_qty"] - quantity
-                new_serials = product.get("serial_numbers", [])
 
             price = float(product["price"])
             line_total = price * quantity
@@ -652,8 +777,6 @@ def create_invoice(customer_id: int, items: list):
                 "quantity": quantity,
                 "serial_number": serial_number,
                 "line_total": line_total,
-                "new_stock": new_stock,
-                "new_serials": new_serials,
             })
 
         invoice_number = generate_invoice_number()
@@ -661,7 +784,13 @@ def create_invoice(customer_id: int, items: list):
         cursor.execute("""
             INSERT INTO invoices (invoice_number, customer_id, customer_name, total_amount, payment_status)
             VALUES (%s, %s, %s, %s, %s)
-        """, (invoice_number, customer_id, customer["name"], total_amount, "UNPAID"))
+        """, (
+            invoice_number,
+            customer_id,
+            customer["name"],
+            total_amount,
+            "PENDING"
+        ))
 
         invoice_id = cursor.lastrowid
 
@@ -681,17 +810,6 @@ def create_invoice(customer_id: int, items: list):
                 item["line_total"],
             ))
 
-            cursor.execute("""
-                UPDATE products
-                SET stock_qty = %s, status = %s, serial_numbers = %s
-                WHERE id = %s
-            """, (
-                item["new_stock"],
-                calculate_status(item["new_stock"]),
-                json.dumps(item["new_serials"]),
-                item["product_id"]
-            ))
-
         conn.commit()
         return invoice_id, invoice_number
 
@@ -700,7 +818,6 @@ def create_invoice(customer_id: int, items: list):
         raise
     finally:
         conn.close()
-
 
 def find_serial_usage(serial_number: str):
     serial_number = serial_number.strip()
@@ -716,6 +833,7 @@ def find_serial_usage(serial_number: str):
             ii.product_name,
             i.invoice_number,
             i.customer_name,
+            i.payment_status,
             i.created_at
         FROM invoice_items ii
         JOIN invoices i ON ii.invoice_id = i.id
@@ -723,17 +841,28 @@ def find_serial_usage(serial_number: str):
         ORDER BY ii.id DESC
         LIMIT 1
     """, (serial_number,))
-    sold_row = cursor.fetchone()
+    row = cursor.fetchone()
 
-    if sold_row:
+    if row:
+        payment_status = str(row.get("payment_status", "")).upper()
+
+        if payment_status == "PAID":
+            status_label = "Sold"
+        elif payment_status == "PENDING":
+            status_label = "Pending"
+        elif payment_status == "CANCELLED":
+            status_label = "Cancelled"
+        else:
+            status_label = payment_status.title() if payment_status else "Unknown"
+
         conn.close()
         return {
-            "serial_number": sold_row["serial_number"],
-            "product_name": sold_row["product_name"],
-            "status": "Sold",
-            "invoice_number": sold_row["invoice_number"],
-            "customer_name": sold_row["customer_name"],
-            "created_at": sold_row["created_at"],
+            "serial_number": row["serial_number"],
+            "product_name": row["product_name"],
+            "status": status_label,
+            "invoice_number": row["invoice_number"],
+            "customer_name": row["customer_name"],
+            "created_at": row["created_at"],
         }
 
     cursor.execute("""

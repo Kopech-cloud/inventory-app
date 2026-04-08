@@ -305,7 +305,7 @@ class DashboardWindow(QMainWindow):
 
         layout.addWidget(user_card)
 
-        footer = QLabel("v1.0")
+        footer = QLabel("v2.0")
         footer.setObjectName("sidebarFooter")
         footer.setAlignment(Qt.AlignCenter)
         layout.addWidget(footer)
