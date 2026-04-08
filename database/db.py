@@ -9,9 +9,27 @@ from datetime import datetime
 import bcrypt
 
 import os
+import sys
 from dotenv import load_dotenv
 
-load_dotenv()
+
+def load_environment():
+    candidates = []
+
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).resolve().parent / ".env")
+
+    candidates.append(Path(__file__).resolve().parent.parent / ".env")
+
+    for env_path in candidates:
+        if env_path.exists():
+            load_dotenv(env_path)
+            return
+
+    load_dotenv()
+
+
+load_environment()
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
