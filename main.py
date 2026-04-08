@@ -1,9 +1,19 @@
+import os
 import sys
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
-from database.db_sqlite_backup import create_default_admin, init_db
+from database.db import create_default_admin, init_db
 from ui.login import LoginWindow
+
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 
 def main():
@@ -11,9 +21,7 @@ def main():
     create_default_admin()
 
     app = QApplication(sys.argv)
-
-    # set application icon
-    app.setWindowIcon(QIcon("assets/icon.png"))
+    app.setWindowIcon(QIcon(resource_path("assets/icon.png")))
 
     window = LoginWindow()
     window.show()

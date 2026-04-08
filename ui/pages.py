@@ -55,6 +55,7 @@ from database.db import (
     get_low_stock_report,
     get_recent_sales_report,
     export_sales_report_to_excel,
+    search_invoices_by_customer_name,
 )
 from reports.invoice_pdf import export_invoice_pdf
 
@@ -1158,9 +1159,12 @@ class CustomersPage(PageContainer):
         )
 
         if reply == QMessageBox.Yes:
-            delete_customer(customer_id)
-            self.load_customers()
-            QMessageBox.information(self, "Deleted", "Customer deleted successfully.")
+            try:
+                delete_customer(customer_id)
+                self.load_customers()
+                QMessageBox.information(self, "Deleted", "Customer deleted successfully.")
+            except Exception as e:
+                QMessageBox.warning(self, "Delete Failed", str(e))
 
 
 class InvoicesPage(PageContainer):
@@ -1256,10 +1260,10 @@ class InvoicesPage(PageContainer):
         search_row.setSpacing(10)
 
         self.serial_search_input = QLineEdit()
-        self.serial_search_input.setPlaceholderText("Enter serial number to search")
+        self.serial_search_input.setPlaceholderText("Enter serial number or customer name to search")
         self.serial_search_input.setObjectName("searchInput")
 
-        self.serial_search_btn = QPushButton("Search Serial")
+        self.serial_search_btn = QPushButton("Search")
         self.serial_search_btn.setObjectName("primaryButton")
         self.serial_search_btn.clicked.connect(self.search_serial_usage)
 
@@ -1604,17 +1608,31 @@ class InvoicesPage(PageContainer):
             QMessageBox.warning(self, "Error", str(e))
 
     def search_serial_usage(self):
-        serial = self.serial_search_input.text().strip()
+        search_value = self.serial_search_input.text().strip()
 
-        if not serial:
-            QMessageBox.warning(self, "Missing Serial", "Enter a serial number to search.")
+        if not search_value:
+            QMessageBox.warning(self, "Missing Search", "Enter a serial number or customer name to search.")
             return
 
-        result = find_serial_usage(serial)
+        result = find_serial_usage(search_value)
 
         if not result:
+            customer_results = search_invoices_by_customer_name(search_value)
+
+            if customer_results:
+                lines = []
+                for row in customer_results:
+                    lines.append(
+                        f"Customer: {row['customer_name']} | "
+                        f"Invoice: {row['invoice_number']} | "
+                        f"Status: {row['payment_status']} | "
+                        f"Date: {row['created_at']}"
+                    )
+                self.serial_search_result.setText("\n".join(lines))
+                return
+
             self.serial_search_result.setText(
-                f"Serial '{serial}' was not found in sold items or current stock."
+                f"No serial or customer match found for '{search_value}'."
             )
             return
 
@@ -1629,6 +1647,24 @@ class InvoicesPage(PageContainer):
                 f"Invoice: {result['invoice_number']}\n"
                 f"Date: {result['created_at']}"
             )
+        elif status == "Pending":
+            self.serial_search_result.setText(
+                f"Serial: {result['serial_number']}\n"
+                f"Product: {result['product_name']}\n"
+                f"Status: Pending Invoice\n"
+                f"Customer: {result['customer_name']}\n"
+                f"Invoice: {result['invoice_number']}\n"
+                f"Date: {result['created_at']}"
+            )
+        elif status == "Cancelled":
+            self.serial_search_result.setText(
+                f"Serial: {result['serial_number']}\n"
+                f"Product: {result['product_name']}\n"
+                f"Status: Cancelled Invoice\n"
+                f"Customer: {result['customer_name']}\n"
+                f"Invoice: {result['invoice_number']}\n"
+                f"Date: {result['created_at']}"
+            )
         elif status == "In Stock":
             self.serial_search_result.setText(
                 f"Serial: {result['serial_number']}\n"
@@ -1638,7 +1674,8 @@ class InvoicesPage(PageContainer):
         else:
             self.serial_search_result.setText(
                 f"Serial: {result['serial_number']}\n"
-                f"Product: {result['product_name']}"
+                f"Product: {result['product_name']}\n"
+                f"Status: {status}"
             )
 
     def load_invoices(self):

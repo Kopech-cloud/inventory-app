@@ -15,6 +15,17 @@ from PySide6.QtWidgets import (
 from database.db import authenticate_user
 from ui.dashboard import DashboardWindow
 
+import os
+import sys
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS  # PyInstaller temp folder
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 
 class LoginWindow(QMainWindow):
     def __init__(self):
@@ -48,7 +59,7 @@ class LoginWindow(QMainWindow):
         layout.setAlignment(Qt.AlignCenter)
 
         logo = QLabel()
-        pixmap = QPixmap("assets/logo.png")
+        pixmap = QPixmap(resource_path("assets/logo.png"))
         if not pixmap.isNull():
             logo.setPixmap(
                 pixmap.scaled(220, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation)

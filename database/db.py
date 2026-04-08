@@ -524,6 +524,17 @@ def update_customer(customer_id: int, name: str, phone: str, email: str, address
 def delete_customer(customer_id: int):
     conn = get_connection()
     cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT COUNT(*) AS total FROM invoices WHERE customer_id = %s",
+        (customer_id,)
+    )
+    result = cursor.fetchone()
+
+    if result["total"] > 0:
+        conn.close()
+        raise ValueError("This customer cannot be deleted because they already have invoice history.")
+
     cursor.execute("DELETE FROM customers WHERE id = %s", (customer_id,))
     conn.commit()
     conn.close()
@@ -693,6 +704,26 @@ def cancel_invoice(invoice_id: int):
     finally:
         conn.close()
 
+def search_invoices_by_customer_name(customer_name: str):
+    customer_name = customer_name.strip()
+    if not customer_name:
+        return []
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, invoice_number, customer_name, total_amount, payment_status, created_at
+        FROM invoices
+        WHERE customer_name LIKE %s
+        ORDER BY id DESC
+        LIMIT 20
+    """, (f"%{customer_name}%",))
+
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
 
 def create_invoice(customer_id: int, items: list):
     if not items:
@@ -784,6 +815,7 @@ def find_serial_usage(serial_number: str):
             ii.product_name,
             i.invoice_number,
             i.customer_name,
+            i.payment_status,
             i.created_at
         FROM invoice_items ii
         JOIN invoices i ON ii.invoice_id = i.id
@@ -791,17 +823,28 @@ def find_serial_usage(serial_number: str):
         ORDER BY ii.id DESC
         LIMIT 1
     """, (serial_number,))
-    sold_row = cursor.fetchone()
+    row = cursor.fetchone()
 
-    if sold_row:
+    if row:
+        payment_status = str(row.get("payment_status", "")).upper()
+
+        if payment_status == "PAID":
+            status_label = "Sold"
+        elif payment_status == "PENDING":
+            status_label = "Pending"
+        elif payment_status == "CANCELLED":
+            status_label = "Cancelled"
+        else:
+            status_label = payment_status.title() if payment_status else "Unknown"
+
         conn.close()
         return {
-            "serial_number": sold_row["serial_number"],
-            "product_name": sold_row["product_name"],
-            "status": "Sold",
-            "invoice_number": sold_row["invoice_number"],
-            "customer_name": sold_row["customer_name"],
-            "created_at": sold_row["created_at"],
+            "serial_number": row["serial_number"],
+            "product_name": row["product_name"],
+            "status": status_label,
+            "invoice_number": row["invoice_number"],
+            "customer_name": row["customer_name"],
+            "created_at": row["created_at"],
         }
 
     cursor.execute("""
